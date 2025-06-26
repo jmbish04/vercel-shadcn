@@ -1,9 +1,4 @@
-# A GitHub Action that uses the Anthropic Claude model as a general-purpose
-# code assistant. It can be triggered by comments, reviews, and issue assignments.
-
-name: 'Claude PR Assistant'
-
-# This action triggers on a variety of events where a user might interact with the assistant.
+name: Claude Assistant
 on:
   issue_comment:
     types: [created]
@@ -13,54 +8,25 @@ on:
     types: [opened, assigned, labeled]
   pull_request_review:
     types: [submitted]
-  pull_request:
-    types: [opened, submitted, synchronize, reopened]
 
 jobs:
-  claude_assistant:
-    name: 'Claude Assistant'
+  claude-response:
     runs-on: ubuntu-latest
-    
-    # The action's own logic will determine if it should proceed based on trigger phrases
-    # or other events, so a job-level 'if' is not needed here.
-    # It also prevents the bot from replying to itself.
-    if: github.actor != 'github-actions[bot]'
-
-    # Grant the necessary permissions for the action to function.
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      # The id-token permission is required for OIDC authentication if using AWS or GCP.
-      id-token: write
-
     steps:
-      # The action itself handles checking out the code, so a separate checkout step is not required.
-      - name: 'Run Claude Code Action'
-        uses: anthropics/claude-code-action@beta
+      - uses: anthropics/claude-code-action@beta
         with:
-          # Required: Use a secret to store your Anthropic API key.
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-
-          # Recommended: The action needs a token to interact with the GitHub API.
-          # The default GITHUB_TOKEN has limited permissions. For full functionality,
-          # create a GitHub App and provide its token here.
-          github_token: ${{ secrets.CLAUDE_APP_TOKEN || secrets.GITHUB_TOKEN }}
-
-          # Automatically run this prompt on PR creation/updates.
-          direct_prompt: "Please review this pull request, suggest improvements, and implement any necessary fixes."
-
-          # Optional: The phrase to look for in comments and bodies for interactive use.
-          trigger_phrase: "@claude"
-
-          # Optional: Trigger the action by assigning an issue to this user.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: add custom trigger phrase (default: @claude)
+          trigger_phrase: "/claude"
+          # Optional: add assignee trigger for issues
           assignee_trigger: "claude"
-          
-          # Optional: Trigger the action by adding this label to an issue.
+          # Optional: add label trigger for issues
           label_trigger: "claude"
-
-          # Optional: Set a timeout in minutes for the action's execution.
-          timeout_minutes: "60"
-
-          # Optional: Limit the number of conversation turns to prevent runaway execution.
+          # Optional: add custom environment variables (YAML format)
+          # claude_env: |
+          #   NODE_ENV: test
+          #   DEBUG: true
+          #   API_URL: https://api.example.com
+          # Optional: limit the number of conversation turns
           # max_turns: "5"
