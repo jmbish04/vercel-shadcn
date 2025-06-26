@@ -1,5 +1,7 @@
 import type { Message } from 'ai';
 import { google } from '@ai-sdk/google';
+import { openai } from '@ai-sdk/openai';
+import { cloudflare } from '@ai-sdk/cloudflare';
 import { streamText } from 'ai';
 
 interface Env {
@@ -26,43 +28,36 @@ export default {
         const { provider, model, messages } = await request.json<JsonBody>();
         switch (provider) {
           case "gemini": {
-            const gemini = google(model || 'gemini-1.5-pro-latest', {
+            if (!env.GOOGLE_GENERATIVE_AI_API_KEY) {
+              return new Response("Gemini API key is not configured", { status: 500 });
+            }
+            const geminiModel = google(model || 'gemini-1.5-pro-latest', {
               apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
               useSearchGrounding: true,
             });
-            const result = streamText({ model: gemini, messages });
+            const result = streamText({ model: geminiModel, messages });
             return result.toDataStreamResponse();
           }
           case "openai": {
-            const res = await fetch("https://api.openai.com/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-              },
-              body: JSON.stringify({
-                model,
-                messages,
-                stream: true,
-              }),
+            if (!env.OPENAI_API_KEY) {
+              return new Response("OpenAI API key is not configured", { status: 500 });
+            }
+            const openaiModel = openai(model || 'gpt-4o-mini', {
+              apiKey: env.OPENAI_API_KEY,
             });
-            return new Response(res.body, {
-              headers: { "Content-Type": "text/event-stream" },
-            });
+            const result = streamText({ model: openaiModel, messages });
+            return result.toDataStreamResponse();
           }
           case "cloudflare": {
-            const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`;
-            const cfRes = await fetch(cfUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}`,
-              },
-              body: JSON.stringify({ messages }),
+            if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) {
+              return new Response("Cloudflare AI credentials are not configured", { status: 500 });
+            }
+            const cloudflareModel = cloudflare(model || '@cf/meta/llama-3.1-8b-instruct', {
+              apiKey: env.CLOUDFLARE_AI_TOKEN,
+              accountID: env.CLOUDFLARE_ACCOUNT_ID,
             });
-            return new Response(cfRes.body, {
-              headers: { "Content-Type": "text/event-stream" },
-            });
+            const result = streamText({ model: cloudflareModel, messages });
+            return result.toDataStreamResponse();
           }
           default:
             return new Response("Unknown provider", { status: 400 });
@@ -129,38 +124,54 @@ export default {
       }
       case "/api/projects": {
         if (!env.GOOGLE_APPS_SCRIPT_API_KEY) {
-          return new Response(JSON.stringify({ error: "Google Apps Script API key not configured" }), { 
-            status: 500, 
-            headers: { "Content-Type": "application/json" } 
-          });
+          return new Response(
+            JSON.stringify({ 
+              error: "Google Apps Script API key is not configured",
+              message: "Please set GOOGLE_APPS_SCRIPT_API_KEY environment variable" 
+            }), 
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
         }
-        
+
         try {
-          const res = await fetch(
+          // Use Google Apps Script API to list projects
+          const response = await fetch(
             `https://script.googleapis.com/v1/projects?key=${env.GOOGLE_APPS_SCRIPT_API_KEY}`,
             {
               headers: {
-                "Accept": "application/json",
+                'Accept': 'application/json',
               },
             }
           );
-          
-          if (!res.ok) {
-            return new Response(JSON.stringify({ error: "Failed to fetch projects" }), { 
-              status: res.status,
-              headers: { "Content-Type": "application/json" } 
-            });
+
+          if (!response.ok) {
+            return new Response(
+              JSON.stringify({ 
+                error: "Failed to fetch projects from Google Apps Script API",
+                status: response.status 
+              }), 
+              { status: response.status, headers: { "Content-Type": "application/json" } }
+            );
           }
-          
-          const data = await res.json();
-          return new Response(JSON.stringify(data), { 
-            headers: { "Content-Type": "application/json" } 
-          });
+
+          const data = await response.json();
+          const projects = (data.projects || []).map((project: any) => ({
+            id: project.scriptId,
+            title: project.title,
+          }));
+
+          return new Response(
+            JSON.stringify(projects), 
+            { headers: { "Content-Type": "application/json" } }
+          );
         } catch (error) {
-          return new Response(JSON.stringify({ error: "Failed to connect to Google Apps Script API" }), { 
-            status: 500,
-            headers: { "Content-Type": "application/json" } 
-          });
+          return new Response(
+            JSON.stringify({ 
+              error: "Failed to fetch Apps Script projects",
+              message: error instanceof Error ? error.message : "Unknown error"
+            }), 
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
         }
       }
       case "/api/project/files": {
@@ -168,44 +179,53 @@ export default {
         if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
           return new Response("Invalid or missing id", { status: 400 });
         }
-        
+
         if (!env.GOOGLE_APPS_SCRIPT_API_KEY) {
-          return new Response(JSON.stringify({ error: "Google Apps Script API key not configured" }), { 
-            status: 500, 
-            headers: { "Content-Type": "application/json" } 
-          });
+          return new Response(
+            JSON.stringify({ 
+              error: "Google Apps Script API key is not configured",
+              message: "Please set GOOGLE_APPS_SCRIPT_API_KEY environment variable" 
+            }), 
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
         }
-        
+
         try {
-          const res = await fetch(
+          // Use Google Apps Script API to get project content
+          const response = await fetch(
             `https://script.googleapis.com/v1/projects/${id}/content?key=${env.GOOGLE_APPS_SCRIPT_API_KEY}`,
             {
               headers: {
-                "Accept": "application/json",
+                'Accept': 'application/json',
               },
             }
           );
-          
-          if (!res.ok) {
-            return new Response(JSON.stringify({ error: "Failed to fetch project files" }), { 
-              status: res.status,
-              headers: { "Content-Type": "application/json" } 
-            });
+
+          if (!response.ok) {
+            return new Response(
+              JSON.stringify({ 
+                error: "Failed to fetch project files from Google Apps Script API",
+                status: response.status 
+              }), 
+              { status: response.status, headers: { "Content-Type": "application/json" } }
+            );
           }
-          
-          const data = await res.json();
-          
-          // Extract file names from the Apps Script project content
-          const files = data.files ? data.files.map((file: any) => file.name) : [];
-          
-          return new Response(JSON.stringify({ files }), { 
-            headers: { "Content-Type": "application/json" } 
-          });
+
+          const data = await response.json();
+          const files = (data.files || []).map((file: any) => file.name);
+
+          return new Response(
+            JSON.stringify({ files }), 
+            { headers: { "Content-Type": "application/json" } }
+          );
         } catch (error) {
-          return new Response(JSON.stringify({ error: "Failed to connect to Google Apps Script API" }), { 
-            status: 500,
-            headers: { "Content-Type": "application/json" } 
-          });
+          return new Response(
+            JSON.stringify({ 
+              error: "Failed to fetch Apps Script project files",
+              message: error instanceof Error ? error.message : "Unknown error"
+            }), 
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
         }
       }
       default: {

@@ -13,13 +13,7 @@ export default function Projects() {
   useEffect(() => {
     fetch("/api/projects")
       .then((r) => r.json())
-      .then((data) => {
-        if (data.error) {
-          setProjects([]);
-        } else {
-          setProjects(data);
-        }
-      })
+      .then((data) => setProjects(data))
       .catch(() => setProjects([]));
   }, []);
 
@@ -34,10 +28,6 @@ export default function Projects() {
   return (
     <div className="space-y-2">
       <h2 className="font-bold">Apps Script Projects</h2>
-      <div className="text-sm text-gray-600 bg-yellow-50 p-3 rounded border">
-        <strong>Note:</strong> Apps Script integration is temporarily disabled due to security and compatibility issues. 
-        This feature requires a complete rewrite to use the Google Apps Script API instead of the clasp CLI.
-      </div>
       <ul className="space-y-1">
         {projects.map((p) => (
           <li key={p.id}>
