@@ -29,8 +29,16 @@ interface GeminiModelList {
   models: { name: string }[];
 }
 
+interface GoogleProjectsResponse {
+  projects?: { scriptId: string; title: string }[];
+}
+
+interface GoogleProjectFilesResponse {
+  files?: { name: string; type: string; source: string }[];
+}
+
 export default {
-async fetch(request, env, ctx) {
+async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
     switch (url.pathname) {
@@ -134,7 +142,7 @@ async fetch(request, env, ctx) {
           headers: { 'Content-Type': res.headers.get('Content-Type') || 'text/plain' }
         });
       }
-      const data = await res.json<any>();
+      const data = await res.json<GoogleProjectsResponse>();
       return new Response(JSON.stringify({ projects: data.projects || [] }), { headers: { 'Content-Type': 'application/json' } });
     }
     case "/api/project/files": {
@@ -154,7 +162,7 @@ async fetch(request, env, ctx) {
           headers: { 'Content-Type': res.headers.get('Content-Type') || 'text/plain' }
         });
       }
-      const data = await res.json<any>();
+      const data = await res.json<GoogleProjectFilesResponse>();
       return new Response(JSON.stringify({ files: data.files || [] }), { headers: { 'Content-Type': 'application/json' } });
     }
     case "/api/vectorize": {
