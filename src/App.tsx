@@ -1,5 +1,6 @@
 import Chat from "@/components/chat";
-import { Card, CardHeader, CardTitle, } from "@/components/ui/card";
+import Projects from "@/components/projects";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 
 export default function App() {
   return (
@@ -11,6 +12,9 @@ export default function App() {
           </CardTitle>
           <p className="text-sm text-muted-foreground">Powered by Vercel AI SDK, Cloudflare Workers, and Google Gemini AI</p>
         </CardHeader>
+        <CardContent>
+          <Projects />
+        </CardContent>
         <Chat />
       </Card>
     </div>

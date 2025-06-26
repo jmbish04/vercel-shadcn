@@ -10,15 +10,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import WeatherCard from "@/components/weather-card";
 import { cn } from "@/lib/utils";
 import { useChat, type Message } from "@ai-sdk/react";
+import { useEffect, useState } from "react";
 
 const EMPTY_STATE_MESSAGE = `
-# Welcome, slut!
+# Welcome!
 
 This is a chat application powered by:
 
 - **[Vercel AI SDK](https://sdk.vercel.ai)** for managing the chat interface.
 - **[Cloudflare Workers](https://workers.cloudflare.com)** for running the AI model.
-- **Gemini, OpenAI, and Workers AI** as underlying language models.
+- **Gemini, OpenAI, and Workers AI** as selectable language models.
+
 
 Feel free to ask me anything!  I can answer questions, provide summaries, translate text, and more.
 `;
@@ -35,37 +37,34 @@ const MarkdownComponents: Components = {
 };
 
 export default function Chat() {
-  const [provider, setProvider] = useState<'gemini' | 'openai' | 'workers' | 'assistant'>('gemini');
+  const [provider, setProvider] = useState("gemini");
+  const [model, setModel] = useState("gemini-1.5-pro-latest");
   const [models, setModels] = useState<string[]>([]);
-  const [model, setModel] = useState('gemini-1.5-pro-latest');
-  const [sessionId] = useState(() => {
-    const id = localStorage.getItem('session-id') || crypto.randomUUID();
-    localStorage.setItem('session-id', id);
-    return id;
-  });
 
-  const { messages, input, handleInputChange, handleSubmit, setMessages, setInput } = useChat({
-    api: '/api/chat',
-    body: { id: sessionId, provider, model },
+  const { messages, input, handleInputChange, handleSubmit } = useChat({
+    api: "/api/chat",
+    body: { provider, model },
   });
-
-  useEffect(() => {
-    fetch(`/api/session?id=${sessionId}`)
-      .then(res => res.json())
-      .then((msgs: Message[]) => setMessages(msgs));
-  }, [sessionId, setMessages]);
+  const hasMessages = messages.length > 0;
 
   useEffect(() => {
     fetch(`/api/models?provider=${provider}`)
-      .then(res => res.json())
-      .then(data => {
-        const list = Array.isArray(data) ? data : data.models;
-        setModels(list);
-        if (list && list.length) setModel(list[0]);
+      .then((r) => r.json())
+      .then((data) => {
+        const models = data.models || [];
+        setModels(models);
+        if (models.length > 0) {
+          setModel(models[0]);
+        } else {
+          setModel('');
+        }
+      })
+      .catch((error) => {
+        console.error(`Failed to fetch models for ${provider}:`, error);
+        setModels([]);
+        setModel('');
       });
   }, [provider]);
-
-  const hasMessages = messages.length > 0;
 
   return (
     <>
@@ -134,6 +133,26 @@ export default function Chat() {
           </select>
         </div>
         <form onSubmit={handleSubmit} className="flex w-full space-x-2">
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            className="border rounded p-1"
+          >
+            <option value="gemini">Gemini</option>
+            <option value="openai">OpenAI</option>
+            <option value="cloudflare">Workers AI</option>
+          </select>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="border rounded p-1"
+          >
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
           <Input
             name="prompt"
             value={input}
