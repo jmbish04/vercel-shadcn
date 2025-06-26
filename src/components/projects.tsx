@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
 
+interface Project {
+  id: string;
+  title?: string;
+}
+
 export default function Projects() {
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [files, setFiles] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/projects")
       .then((r) => r.json())
-      .then((data) => setProjects(data))
+      .then((data) => setProjects(data as Project[]))
       .catch(() => setProjects([]));
   }, []);
 
@@ -24,7 +29,7 @@ export default function Projects() {
     <div className="space-y-2">
       <h2 className="font-bold">Apps Script Projects</h2>
       <ul className="space-y-1">
-        {projects.map((p) => (
+        {projects.map((p: Project) => (
           <li key={p.id}>
             <button
               className="underline"

@@ -1,7 +1,8 @@
 import type { Message } from 'ai';
 import { google } from '@ai-sdk/google';
+import { openai } from '@ai-sdk/openai';
+import { cloudflare } from '@ai-sdk/cloudflare';
 import { streamText } from 'ai';
-import { exec } from 'node:child_process';
 
 interface Env {
   GOOGLE_GENERATIVE_AI_API_KEY: string;
@@ -26,6 +27,9 @@ export default {
         const { provider, model, messages } = await request.json<JsonBody>();
         switch (provider) {
           case "gemini": {
+            if (!env.GOOGLE_GENERATIVE_AI_API_KEY) {
+              return new Response("Gemini API key is not configured.", { status: 500 });
+            }
             const gemini = google(model || 'gemini-1.5-pro-latest', {
               apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
               useSearchGrounding: true,
@@ -34,35 +38,23 @@ export default {
             return result.toDataStreamResponse();
           }
           case "openai": {
-            const res = await fetch("https://api.openai.com/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-              },
-              body: JSON.stringify({
-                model,
-                messages,
-                stream: true,
-              }),
-            });
-            return new Response(res.body, {
-              headers: { "Content-Type": "text/event-stream" },
-            });
+            if (!env.OPENAI_API_KEY) {
+              return new Response("OpenAI API key is not configured.", { status: 500 });
+            }
+            const openaiModel = openai(model, { apiKey: env.OPENAI_API_KEY });
+            const result = streamText({ model: openaiModel, messages });
+            return result.toDataStreamResponse();
           }
           case "cloudflare": {
-            const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`;
-            const cfRes = await fetch(cfUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}`,
-              },
-              body: JSON.stringify({ messages }),
+            if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) {
+              return new Response("Cloudflare AI credentials are not configured.", { status: 500 });
+            }
+            const cloudflareModel = cloudflare(model, {
+              apiToken: env.CLOUDFLARE_AI_TOKEN,
+              accountId: env.CLOUDFLARE_ACCOUNT_ID,
             });
-            return new Response(cfRes.body, {
-              headers: { "Content-Type": "text/event-stream" },
-            });
+            const result = streamText({ model: cloudflareModel, messages });
+            return result.toDataStreamResponse();
           }
           default:
             return new Response("Unknown provider", { status: 400 });
@@ -128,36 +120,21 @@ export default {
         }
       }
       case "/api/projects": {
-        return new Promise((resolve) => {
-          exec("clasp list --json", (err, stdout, stderr) => {
-            if (err) {
-              resolve(new Response(stderr, { status: 500 }));
-            } else {
-              resolve(new Response(stdout, { headers: { "Content-Type": "application/json" } }));
-            }
-          });
+        // REMOVED: Apps Script integration using exec is a security vulnerability
+        // and incompatible with Cloudflare Workers runtime.
+        // TODO: Implement using Google Apps Script API directly
+        return new Response(JSON.stringify({ error: "Apps Script integration temporarily disabled for security" }), {
+          status: 501,
+          headers: { "Content-Type": "application/json" }
         });
       }
       case "/api/project/files": {
-        const id = url.searchParams.get("id");
-        if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
-          return new Response("Invalid or missing id", { status: 400 });
-        }
-        return new Promise((resolve) => {
-          execFile("clasp", ["pull", "--scriptId", id, "--rootDir", `/tmp/${id}`], (err) => {
-            if (err) {
-              resolve(new Response("pull failed", { status: 500 }));
-              return;
-            }
-            execFile("ls", [`/tmp/${id}`], (err2, out) => {
-              if (err2) {
-                resolve(new Response("list failed", { status: 500 }));
-              } else {
-                const files = out.split("\n").filter(Boolean);
-                resolve(new Response(JSON.stringify({ files }), { headers: { "Content-Type": "application/json" } }));
-              }
-            });
-          });
+        // REMOVED: Apps Script integration using exec is a security vulnerability
+        // and incompatible with Cloudflare Workers runtime. 
+        // TODO: Implement using Google Apps Script API directly
+        return new Response(JSON.stringify({ error: "Apps Script integration temporarily disabled for security" }), {
+          status: 501,
+          headers: { "Content-Type": "application/json" }
         });
       }
       default: {

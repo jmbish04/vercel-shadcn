@@ -12,7 +12,7 @@ import { useChat, type Message } from "@ai-sdk/react";
 import { useEffect, useState } from "react";
 
 const EMPTY_STATE_MESSAGE = `
-# Welcome, slut!
+# Welcome!
 
 This is a chat application powered by:
 
