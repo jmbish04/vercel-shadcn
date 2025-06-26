@@ -9,15 +9,16 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useChat, type Message } from "@ai-sdk/react";
+import { useEffect, useState } from "react";
 
 const EMPTY_STATE_MESSAGE = `
-# Welcome, slut!
+# Welcome!
 
 This is a chat application powered by:
 
 - **[Vercel AI SDK](https://sdk.vercel.ai)** for managing the chat interface.
 - **[Cloudflare Workers](https://workers.cloudflare.com)** for running the AI model.
-- **[Google Gemini AI](https://sdk.vercel.ai/providers/ai-sdk-providers/google-generative-ai)** as the underlying language model.
+- **Gemini, OpenAI, and Workers AI** as selectable language models.
 
 Feel free to ask me anything!  I can answer questions, provide summaries, translate text, and more.
 `;
@@ -34,8 +35,34 @@ const MarkdownComponents: Components = {
 };
 
 export default function Chat() {
-  const { messages, input, handleInputChange, handleSubmit } = useChat();
+  const [provider, setProvider] = useState("gemini");
+  const [model, setModel] = useState("gemini-1.5-pro-latest");
+  const [models, setModels] = useState<string[]>([]);
+
+  const { messages, input, handleInputChange, handleSubmit } = useChat({
+    api: "/api/chat",
+    body: { provider, model },
+  });
   const hasMessages = messages.length > 0;
+
+  useEffect(() => {
+    fetch(`/api/models?provider=${provider}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const models = data.models || [];
+        setModels(models);
+        if (models.length > 0) {
+          setModel(models[0]);
+        } else {
+          setModel('');
+        }
+      })
+      .catch((error) => {
+        console.error(`Failed to fetch models for ${provider}:`, error);
+        setModels([]);
+        setModel('');
+      });
+  }, [provider]);
 
   return (
     <>
@@ -65,7 +92,7 @@ export default function Chat() {
                   </Avatar>
                   <div>
                     <p className="font-semibold mb-2">
-                      {message.role === "user" ? "You" : "Gemini AI"}
+                      {message.role === "user" ? "You" : provider.toUpperCase()}
                     </p>
                     <div className="space-y-2">
                       <Markdown components={MarkdownComponents}>
@@ -87,6 +114,26 @@ export default function Chat() {
       </CardContent>
       <CardFooter>
         <form onSubmit={handleSubmit} className="flex w-full space-x-2">
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            className="border rounded p-1"
+          >
+            <option value="gemini">Gemini</option>
+            <option value="openai">OpenAI</option>
+            <option value="cloudflare">Workers AI</option>
+          </select>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="border rounded p-1"
+          >
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
           <Input
             name="prompt"
             value={input}
