@@ -49,15 +49,19 @@ jobs:
           echo "diff_content<<EOF" >> $GITHUB_OUTPUT
           echo "$PR_DIFF" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          
+        
       # Step 4: Call Gemini 1.5 Pro to analyze the diff and generate a patch
       # This is the core step of the workflow.
       - name: 'Analyze Diff with Gemini and Get Patch'
         id: gemini_analysis
+        # FIX: Use the 'env' context to safely pass the diff into the script's environment.
+        # This prevents shell injection issues if the diff contains special characters like single quotes.
+        env:
+          PR_DIFF: ${{ steps.get_diff.outputs.diff_content }}
         run: |
-          # The prompt instructs Gemini to act as an expert engineer and return a JSON object
-          # containing a code patch and a summary of its changes.
-          PROMPT='''
+          # The prompt is now constructed by concatenating a template with the diff
+          # from the environment variable. This is much safer than direct substitution.
+          PROMPT_TEMPLATE='''
           You are an expert software engineer acting as an automated code reviewer and implementer.
           Your task is to analyze the following code changes provided in a .diff format.
           1.  Review the code for bugs, style inconsistencies, and potential improvements.
@@ -70,12 +74,13 @@ jobs:
           
           Here is the diff:
           ```diff
-          ${{ steps.get_diff.outputs.diff_content }}
-          ```
           '''
+          # Safely combine the template and the diff content. The $'\n```' adds the closing code fence.
+          FINAL_PROMPT="${PROMPT_TEMPLATE}${PR_DIFF}"$'\n```'
 
           # The payload for the Gemini API call, instructing it to return JSON.
-          JSON_PAYLOAD=$(jq -n --arg prompt "$PROMPT" '{
+          # We use --arg to safely pass the final prompt to jq, preventing injection.
+          JSON_PAYLOAD=$(jq -n --arg prompt "$FINAL_PROMPT" '{
             "contents": [{
               "parts": [{
                 "text": $prompt
@@ -89,7 +94,7 @@ jobs:
 
           # API call to the Gemini 1.5 Pro model.
           # The API key is securely fetched from GitHub secrets.
-          GEMINI_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+          GEMINI_RESPONSE=$(curl -s -X POST "[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro-latest:generateContent?key=$){{ secrets.GEMINI_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d "$JSON_PAYLOAD")
 
@@ -157,4 +162,3 @@ jobs:
               repo: context.repo.repo,
               body: body
             });
-
