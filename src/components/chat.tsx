@@ -1,6 +1,6 @@
 import Markdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { AnchorHTMLAttributes, DetailedHTMLProps, HTMLAttributes } from "react";
+import { AnchorHTMLAttributes, DetailedHTMLProps, HTMLAttributes, useEffect, useState } from "react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { CardContent, CardFooter, } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { fetchSession, fetchModels } from "@/lib/api";
 import { useChat, type Message } from "@ai-sdk/react";
 
 const EMPTY_STATE_MESSAGE = `
@@ -36,10 +37,56 @@ const MarkdownComponents: Components = {
 export default function Chat() {
   const { messages, input, handleInputChange, handleSubmit } = useChat();
   const hasMessages = messages.length > 0;
+  const [sessionError, setSessionError] = useState(false);
+  const [modelError, setModelError] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [model, setModel] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      const data = await fetchSession();
+      if (!data) setSessionError(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchAndSetModels = async () => {
+      try {
+        const data = await fetchModels();
+        if (!data || !Array.isArray(data.models) || data.models.length === 0) {
+          if (isMounted) {
+            setModels([]);
+            setModel('');
+          }
+        } else if (isMounted) {
+          setModels(data.models);
+          setModel(data.models[0] || '');
+        }
+      } catch (err) {
+        console.error(err);
+        if (isMounted) {
+          setModels([]);
+          setModel('');
+          setModelError(true);
+        }
+      }
+    };
+    fetchAndSetModels();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <>
       <CardContent className="h-[400px] space-y-4">
+        {sessionError && (
+          <div className="text-red-500">Failed to load session</div>
+        )}
+        {modelError && (
+          <div className="text-red-500">Failed to load models</div>
+        )}
         <ScrollArea className="h-full w-full">
           <div className="flex flex-col space-y-4">
             {hasMessages ? (
@@ -68,9 +115,27 @@ export default function Chat() {
                       {message.role === "user" ? "You" : "Gemini AI"}
                     </p>
                     <div className="space-y-2">
-                      <Markdown components={MarkdownComponents}>
-                        {message.content}
-                      </Markdown>
+                      {message.content.startsWith("WEATHER:") ? (
+                        (() => {
+                          try {
+                            const data = JSON.parse(
+                              message.content.replace(/^WEATHER:\s*/, "")
+                            );
+                            return (
+                              <pre className="text-sm">
+                                {JSON.stringify(data, null, 2)}
+                              </pre>
+                            );
+                          } catch (e) {
+                            console.error('Failed to parse JSON:', e);
+                            return <div>Invalid JSON response</div>;
+                          }
+                        })()
+                      ) : (
+                        <Markdown components={MarkdownComponents}>
+                          {message.content}
+                        </Markdown>
+                      )}
                     </div>
                   </div>
                 </div>
