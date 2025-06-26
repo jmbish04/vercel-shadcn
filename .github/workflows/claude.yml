@@ -8,6 +8,8 @@ on:
     types: [opened, assigned, labeled]
   pull_request_review:
     types: [submitted]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
   claude-response:
@@ -18,7 +20,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.ANTHROPIC_GITHUB_TOKEN }}
           # Optional: add custom trigger phrase (default: @claude)
-          trigger_phrase: "/claude"
+          # trigger_phrase: "/claude"
           # Optional: add assignee trigger for issues
           assignee_trigger: "claude"
           # Optional: add label trigger for issues
