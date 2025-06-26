@@ -107,16 +107,16 @@ export default {
       }
       case "/api/project/files": {
         const id = url.searchParams.get("id");
-        if (!id) {
-          return new Response("Missing id", { status: 400 });
+        if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+          return new Response("Invalid or missing id", { status: 400 });
         }
         return new Promise((resolve) => {
-          exec(`clasp pull --scriptId ${id} --rootDir /tmp/${id}`, (err) => {
+          execFile("clasp", ["pull", "--scriptId", id, "--rootDir", `/tmp/${id}`], (err) => {
             if (err) {
               resolve(new Response("pull failed", { status: 500 }));
               return;
             }
-            exec(`ls /tmp/${id}`, (err2, out) => {
+            execFile("ls", [`/tmp/${id}`], (err2, out) => {
               if (err2) {
                 resolve(new Response("list failed", { status: 500 }));
               } else {
