@@ -1,0 +1,257 @@
+# A GitHub Action that uses Gemini 1.5 Pro to automatically review pull requests,
+# apply its own suggestions as a patch, commit the changes, and comment on the PR.
+# This version adds interactive triggers for general comments, review comments, and full PR reviews.
+
+name: 'Gemini Auto-Review & Implement'
+
+# This action now triggers on PR events, general issue comments, PR review comments, and PR reviews.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+# Grant the necessary permissions for the workflow to read code,
+# write comments to pull requests, and commit changes to the PR branch.
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  gemini_review_and_implement:
+    name: 'Gemini Review & Implement'
+    runs-on: ubuntu-latest
+    
+    # IMPORTANT: This prevents the action from running on commits made by itself, avoiding infinite loops.
+    if: github.actor != 'github-actions[bot]'
+
+    steps:
+      # Step 1: Checkout the pull request branch
+      - name: 'Checkout PR Branch'
+        uses: actions/checkout@v4
+        with:
+          # If triggered from a PR, checkout the PR's head ref. Otherwise, checkout the default branch.
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          fetch-depth: 0
+
+      # Step 2: Configure Git for the Actions bot
+      - name: 'Set up Git'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Step 3: Get the difference (diff) introduced by the pull request
+      # This diff is the context we will provide to Gemini for automated reviews.
+      - name: 'Get PR Diff'
+        id: get_diff
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review'
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          PR_DIFF=$(git diff "origin/${{ github.event.pull_request.base.ref }}" "HEAD")
+          # The diff is stored in a GitHub Actions output variable for use in later steps.
+          echo "diff_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$PR_DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        
+      # Step 4: Call Gemini 1.5 Pro to analyze the context and generate a patch
+      - name: 'Analyze Context with Gemini and Get Patch'
+        id: gemini_analysis
+        env:
+          PR_DIFF: ${{ steps.get_diff.outputs.diff_content }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body || github.event.review.body }}
+          COMMENT_DIFF_HUNK: ${{ github.event.comment.diff_hunk }}
+          TRIGGER_PHRASE: '@gemini-dev'
+        run: |
+          FINAL_PROMPT=""
+          # Check if the trigger is a full PR review request
+          if [[ "$EVENT_NAME" == "pull_request_review" && "$COMMENT_BODY" == *"$TRIGGER_PHRASE"* ]]; then
+            USER_PROMPT=$(echo "$COMMENT_BODY" | sed "s/$TRIGGER_PHRASE//")
+            read -r -d '' PROMPT_TEMPLATE <<'EOF'
+You are an expert software engineer performing a comprehensive review of an entire pull request.
+Your task is to:
+1.  Analyze the user's request and the full context of the pull request diff.
+2.  Provide a high-level summary of the changes, focusing on architecture, best practices, and potential improvements. Do not suggest line-by-line changes unless they are critical.
+3.  If applicable, generate a code patch in the universal diff format (`.patch`) for any critical fixes you identify.
+
+Respond with a single, raw JSON object with "patch" and "summary" keys.
+
+**Pull Request Diff:**
+\`\`\`diff
+${PR_DIFF}
+\`\`\`
+
+**User's Request:**
+---
+EOF
+            FINAL_PROMPT="${PROMPT_TEMPLATE}${USER_PROMPT}"
+
+          # Check if the trigger is an interactive comment on a PR review
+          elif [[ "$EVENT_NAME" == "pull_request_review_comment" && "$COMMENT_BODY" == *"$TRIGGER_PHRASE"* ]]; then
+            USER_PROMPT=$(echo "$COMMENT_BODY" | sed "s/$TRIGGER_PHRASE//")
+            read -r -d '' PROMPT_TEMPLATE <<'EOF'
+You are an expert software engineer in a threaded conversation on a pull request review. A user is replying to a review comment.
+Your task is to:
+1.  Analyze the user's request, the original code diff snippet, and the full PR context.
+2.  Generate a code patch in the universal diff format (`.patch`) that implements the requested changes.
+3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them.
+
+Respond with a single, raw JSON object with "patch" and "summary" keys.
+
+**Original Code Snippet:**
+\`\`\`diff
+${COMMENT_DIFF_HUNK}
+\`\`\`
+
+**User's Request:**
+---
+EOF
+            FINAL_PROMPT="${PROMPT_TEMPLATE}${USER_PROMPT}"
+
+          # Check if the trigger is a general interactive comment
+          elif [[ "$EVENT_NAME" == "issue_comment" && "$COMMENT_BODY" == *"$TRIGGER_PHRASE"* ]]; then
+            USER_PROMPT=$(echo "$COMMENT_BODY" | sed "s/$TRIGGER_PHRASE//")
+            read -r -d '' PROMPT_TEMPLATE <<'EOF'
+You are an expert software engineer. A user has summoned you with the following request on a GitHub issue or pull request.
+Your task is to:
+1.  Understand the user's request in the context of the repository.
+2.  Generate a code patch in the universal diff format (`.patch`) that implements the requested changes.
+3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them.
+
+Respond with a single, raw JSON object with "patch" and "summary" keys.
+
+**User's Request:**
+---
+EOF
+            FINAL_PROMPT="${PROMPT_TEMPLATE}${USER_PROMPT}"
+
+          # Check if the trigger is an automated PR review on creation
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            read -r -d '' PROMPT_TEMPLATE <<'EOF'
+You are an expert software engineer acting as an automated code reviewer and implementer.
+Your task is to analyze the following code changes provided in a .diff format.
+1.  Review the code for bugs, style inconsistencies, and potential improvements.
+2.  Generate a code patch in the universal diff format (`.patch`) that implements your suggested improvements directly. The patch should be applicable to the original code.
+3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them. This summary will be posted as a comment on the pull request.
+
+Respond with a single, raw JSON object with "patch" and "summary" keys.
+
+**Pull Request Diff:**
+\`\`\`diff
+EOF
+            FINAL_PROMPT="${PROMPT_TEMPLATE}
+${PR_DIFF}
+\`\`\`"
+          else
+            echo "Not a trigger event. Exiting."
+            exit 0
+          fi
+
+          JSON_PAYLOAD=$(jq -n --arg prompt "$FINAL_PROMPT" '{
+            "contents": [{
+              "parts": [{
+                "text": $prompt
+              }]
+            }],
+            "generationConfig": {
+              "response_mime_type": "application/json",
+              "temperature": 0.3
+            }
+          }')
+
+          GEMINI_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD")
+
+          CLEAN_JSON=$(echo "$GEMINI_RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+
+          echo "patch<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLEAN_JSON" | jq -r .patch >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLEAN_JSON" | jq -r .summary >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      # Step 5: Apply the patch generated by Gemini
+      - name: 'Apply Patch'
+        id: apply_patch
+        if: steps.gemini_analysis.outputs.patch != '' && steps.gemini_analysis.outputs.patch != 'null'
+        run: |
+          echo "Gemini has suggested changes. Applying patch..."
+          echo "${{ steps.gemini_analysis.outputs.patch }}" > gemini.patch
+          
+          if git apply --reject --whitespace=fix gemini.patch; then
+            echo "Patch applied successfully."
+            echo "applied=true" >> $GITHUB_OUTPUT
+          else
+            echo "Failed to apply patch automatically. There might be conflicts."
+            echo "applied=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Step 6: Commit and push the changes if the patch was applied successfully
+      - name: 'Commit and Push Changes'
+        id: commit_push
+        if: steps.apply_patch.outputs.applied == 'true'
+        run: |
+          git add .
+          # Create a new branch if triggered from an issue comment, otherwise push to the existing PR branch
+          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            BRANCH_NAME="gemini-fix-${{ github.event.issue.number }}"
+            git checkout -b $BRANCH_NAME
+            git commit -m "feat: Implement changes requested in #${{ github.event.issue.number }}"
+            git push origin $BRANCH_NAME
+            echo "pushed_branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          else
+            git commit -m "feat: Apply Gemini's automated code improvements"
+            git push origin ${{ github.event.pull_request.head.ref }}
+            echo "Committed and pushed Gemini's changes to the PR branch."
+          fi
+
+      # Step 7: Comment on the Pull Request with the results
+      - name: 'Comment on PR or Issue'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `${{ steps.gemini_analysis.outputs.summary }}`;
+            const changes_applied = `${{ steps.apply_patch.outputs.applied }}` === 'true';
+            const event_name = `${{ github.event_name }}`;
+            const pushed_branch = `${{ steps.commit_push.outputs.pushed_branch }}`;
+            let body;
+
+            if (changes_applied) {
+              if (event_name === 'issue_comment' && pushed_branch) {
+                const pr_url = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/pull/new/${pushed_branch}`;
+                body = `🤖 **Gemini Auto-Implement**\n\nI have implemented the changes you requested. You can review them and open a pull request here: [${pushed_branch}](${pr_url})\n\n**Summary of Changes:**\n\n` + summary;
+              } else {
+                body = "🤖 **Gemini Auto-Review & Implement**\n\nI have analyzed the pull request and implemented the following improvements directly:\n\n" + summary;
+              }
+            } else if (summary && summary.trim() !== "" && summary.trim() !== 'null') {
+              body = "🤖 **Gemini Auto-Review**\n\nI have analyzed your request and have the following suggestions. I was unable to apply them automatically:\n\n" + summary;
+            } else {
+              body = "🤖 **Gemini Auto-Review**\n\nI have analyzed the pull request and found no necessary changes. Looks good to me!";
+            }
+            
+            // If this is a reply to a review comment, use the pulls API to create a reply
+            if (event_name === 'pull_request_review_comment') {
+              github.rest.pulls.createReplyForReviewComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                comment_id: context.payload.comment.id,
+                body: body
+              });
+            } else {
+              // Otherwise, create a general issue/PR comment
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
