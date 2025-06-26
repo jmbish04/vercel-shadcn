@@ -11,6 +11,7 @@ First, use the button below to deploy this project to Cloudflare Workers.
 **IMPORTANT:** Once deployed, access the newly deployed application in your dashboard and set the following environment variables:
 
 - `GOOGLE_GENERATIVE_AI_API_KEY` – Gemini API key ([instructions](https://ai.google.dev/gemini-api/docs/api-key))
+- `GOOGLE_APPS_SCRIPT_API_KEY` – Google Apps Script API key for project management
 - `OPENAI_API_KEY` – OpenAI API key
 - `CLOUDFLARE_AI_TOKEN` – API token for Workers AI
 - `CLOUDFLARE_ACCOUNT_ID` – your Cloudflare account id
