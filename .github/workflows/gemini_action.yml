@@ -61,63 +61,64 @@ jobs:
       # This is the core step of the workflow. It's enhanced to handle both automated and interactive triggers.
       - name: 'Analyze Diff with Gemini and Get Patch'
         id: gemini_analysis
-        # FIX: Use the 'env' context to safely pass the diff into the script's environment.
         env:
           PR_DIFF: ${{ steps.get_diff.outputs.diff_content }}
-          # Pass the event name and comment body to the script
           EVENT_NAME: ${{ github.event_name }}
           COMMENT_BODY: ${{ github.event.comment.body }}
-          # Define the trigger phrase
           TRIGGER_PHRASE: '@gemini-dev'
         run: |
-          PROMPT=""
-          # Check if the trigger is an interactive comment
+          FINAL_PROMPT=""
+          # Check if the trigger is an interactive comment that contains the trigger phrase
           if [[ "$EVENT_NAME" == "issue_comment" && "$COMMENT_BODY" == *"$TRIGGER_PHRASE"* ]]; then
-            # Extract the user's prompt from the comment, removing the trigger phrase
             USER_PROMPT=$(echo "$COMMENT_BODY" | sed "s/$TRIGGER_PHRASE//")
-            PROMPT_TEMPLATE='''
-            You are an expert software engineer acting as an automated code reviewer and implementer.
-            A user has summoned you with the following request on a GitHub issue or pull request.
-            Your task is to:
-            1.  Understand the user's request in the context of the repository.
-            2.  Generate a code patch in the universal diff format (`.patch`) that implements the requested changes.
-            3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them.
-            
-            Respond with a single, raw JSON object containing two keys: "patch" and "summary".
-            - The "patch" key must contain a string of the code changes in the `.patch` format. If no changes are needed, return an empty string.
-            - The "summary" key must contain a markdown string for the pull request comment.
+            # Use a heredoc for the prompt template for safety and readability
+            read -r -d '' PROMPT_TEMPLATE <<'EOF'
+You are an expert software engineer acting as an automated code reviewer and implementer.
+A user has summoned you with the following request on a GitHub issue or pull request.
+Your task is to:
+1.  Understand the user's request in the context of the repository.
+2.  Generate a code patch in the universal diff format (`.patch`) that implements the requested changes.
+3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them.
 
-            Here is the user's request:
-            ---
-            '''
+Respond with a single, raw JSON object containing two keys: "patch" and "summary".
+- The "patch" key must contain a string of the code changes in the `.patch` format. If no changes are needed, return an empty string.
+- The "summary" key must contain a markdown string for the pull request comment.
+
+Here is the user's request:
+---
+EOF
             FINAL_PROMPT="${PROMPT_TEMPLATE}${USER_PROMPT}"
 
           # Check if the trigger is an automated PR review
           elif [[ "$EVENT_NAME" == "pull_request" ]]; then
-            PROMPT_TEMPLATE='''
-            You are an expert software engineer acting as an automated code reviewer and implementer.
-            Your task is to analyze the following code changes provided in a .diff format.
-            1.  Review the code for bugs, style inconsistencies, and potential improvements.
-            2.  Generate a code patch in the universal diff format (`.patch`) that implements your suggested improvements directly. The patch should be applicable to the original code.
-            3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them. This summary will be posted as a comment on the pull request.
-            
-            Respond with a single, raw JSON object containing two keys: "patch" and "summary".
-            - The "patch" key must contain a string of the code changes in the `.patch` format. If no changes are needed, return an empty string.
-            - The "summary" key must contain a markdown string for the pull request comment.
-            
-            Here is the diff:
-            ```diff
-            '''
-            FINAL_PROMPT="${PROMPT_TEMPLATE}${PR_DIFF}"$'\n```'
+            # Use a heredoc for the prompt template for safety and readability
+            read -r -d '' PROMPT_TEMPLATE <<'EOF'
+You are an expert software engineer acting as an automated code reviewer and implementer.
+Your task is to analyze the following code changes provided in a .diff format.
+1.  Review the code for bugs, style inconsistencies, and potential improvements.
+2.  Generate a code patch in the universal diff format (`.patch`) that implements your suggested improvements directly. The patch should be applicable to the original code.
+3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them. This summary will be posted as a comment on the pull request.
+
+Respond with a single, raw JSON object containing two keys: "patch" and "summary".
+- The "patch" key must contain a string of the code changes in the `.patch` format. If no changes are needed, return an empty string.
+- The "summary" key must contain a markdown string for the pull request comment.
+
+Here is the diff:
+```diff
+EOF
+            FINAL_PROMPT="${PROMPT_TEMPLATE}
+${PR_DIFF}
+\`\`\`"
           else
             echo "Not a trigger event. Exiting."
             exit 0
           fi
 
+          # FIX: Use 'prompt' instead of '$prompt' in the jq query. The --arg flag makes it available as a variable.
           JSON_PAYLOAD=$(jq -n --arg prompt "$FINAL_PROMPT" '{
             "contents": [{
               "parts": [{
-                "text": $prompt
+                "text": prompt
               }]
             }],
             "generationConfig": {
@@ -126,7 +127,7 @@ jobs:
             }
           }')
 
-          GEMINI_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+          GEMINI_RESPONSE=$(curl -s -X POST "[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=$){{ secrets.GEMINI_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d "$JSON_PAYLOAD")
 
@@ -159,6 +160,7 @@ jobs:
 
       # Step 6: Commit and push the changes if the patch was applied successfully
       - name: 'Commit and Push Changes'
+        id: commit_push
         if: steps.apply_patch.outputs.applied == 'true'
         run: |
           git add .
@@ -174,7 +176,6 @@ jobs:
             git push origin ${{ github.head_ref }}
             echo "Committed and pushed Gemini's changes to the PR."
           fi
-        id: commit_push
 
       # Step 7: Comment on the Pull Request with the results
       # This step uses the 'github-script' action to interact with the GitHub API.
@@ -189,7 +190,7 @@ jobs:
             let body;
 
             if (changes_applied) {
-              if (event_name === 'issue_comment') {
+              if (event_name === 'issue_comment' && pushed_branch) {
                 const pr_url = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/pull/new/${pushed_branch}`;
                 body = `🤖 **Gemini Auto-Implement**\n\nI have implemented the changes you requested. You can review them and open a pull request here: [${pushed_branch}](${pr_url})\n\n**Summary of Changes:**\n\n` + summary;
               } else {
