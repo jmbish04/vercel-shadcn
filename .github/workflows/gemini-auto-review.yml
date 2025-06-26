@@ -1,0 +1,183 @@
+name: 'Gemini Auto-Review & Implement'
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  gemini_review_and_implement:
+    name: 'Gemini Review & Implement'
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - name: 'Check for multiple open PRs'
+        id: check_prs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pulls } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              sort: 'created',
+              direction: 'asc'
+            });
+            if (pulls.length > 1) {
+              const target = pulls[0];
+              if (target.number !== context.issue.number) {
+                core.setOutput('merge_needed', 'true');
+                core.setOutput('target_number', target.number.toString());
+                core.setOutput('target_branch', target.head.ref);
+                core.setOutput('current_branch', context.payload.pull_request.head.ref);
+              } else {
+                core.setOutput('merge_needed', 'false');
+              }
+            } else {
+              core.setOutput('merge_needed', 'false');
+            }
+      - name: 'Checkout target branch'
+        if: steps.check_prs.outputs.merge_needed == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.check_prs.outputs.target_branch }}
+          fetch-depth: 0
+      - name: 'Merge current PR into target'
+        if: steps.check_prs.outputs.merge_needed == 'true'
+        run: |
+          git fetch origin ${{ steps.check_prs.outputs.current_branch }}
+          git merge --no-ff origin/${{ steps.check_prs.outputs.current_branch }} -m "Merge PR #${{ github.event.pull_request.number }} into PR #${{ steps.check_prs.outputs.target_number }}"
+          git push origin HEAD:${{ steps.check_prs.outputs.target_branch }}
+      - name: 'Comment and close merged PR'
+        if: steps.check_prs.outputs.merge_needed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt('${{ steps.check_prs.outputs.target_number }}', 10),
+              body: `Merged PR #${context.issue.number} into this PR.`
+            });
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              state: 'closed'
+            });
+      - name: 'Set merge flag'
+        if: steps.check_prs.outputs.merge_needed == 'true'
+        run: echo "merged=true" >> $GITHUB_ENV
+      - name: 'Checkout PR Branch'
+        if: env.merged != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: 'Set up Git'
+        if: env.merged != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: 'Get PR Diff'
+        if: env.merged != 'true'
+        id: get_diff
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          PR_DIFF=$(git diff "origin/${{ github.base_ref }}" "HEAD")
+          echo "diff_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$PR_DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: 'Analyze Diff with Gemini and Get Patch'
+        if: env.merged != 'true'
+        id: gemini_analysis
+        shell: bash
+        run: |
+          read -r -d '' PROMPT <<'EOS'
+          You are an expert software engineer acting as an automated code reviewer and implementer.
+          Your task is to analyze the following code changes provided in a .diff format.
+          1.  Review the code for bugs, style inconsistencies, and potential improvements.
+          2.  Generate a code patch in the universal diff format (`.patch`) that implements your suggested improvements directly. The patch should be applicable to the original code.
+          3.  Provide a concise, bulleted markdown summary of the changes you are making and the reasoning behind them. This summary will be posted as a comment on the pull request.
+          
+          Respond with a single, raw JSON object containing two keys: "patch" and "summary".
+          - The "patch" key must contain a string of the code changes in the `.patch` format. If no changes are needed, return an empty string.
+          - The "summary" key must contain a markdown string for the pull request comment.
+          
+          Here is the diff:
+          ```diff
+          ${{ steps.get_diff.outputs.diff_content }}
+          ```
+          EOS
+
+          JSON_PAYLOAD=$(jq -n --arg prompt "$PROMPT" '{
+            "contents": [{
+              "parts": [{
+                "text": $prompt
+              }]
+            }],
+            "generationConfig": {
+              "response_mime_type": "application/json",
+              "temperature": 0.3
+            }
+          }')
+
+          GEMINI_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD")
+
+          CLEAN_JSON=$(echo "$GEMINI_RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+
+          echo "patch<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLEAN_JSON" | jq -r .patch >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLEAN_JSON" | jq -r .summary >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      - name: 'Apply Patch'
+        if: env.merged != 'true' && steps.gemini_analysis.outputs.patch != '' && steps.gemini_analysis.outputs.patch != 'null'
+        id: apply_patch
+        shell: bash
+        run: |
+          echo "Gemini has suggested changes. Applying patch..."
+          echo "${{ steps.gemini_analysis.outputs.patch }}" > gemini.patch
+          if git apply --reject --whitespace=fix gemini.patch; then
+            echo "Patch applied successfully."
+            echo "applied=true" >> $GITHUB_OUTPUT
+          else
+            echo "Failed to apply patch automatically. There might be conflicts."
+            echo "applied=false" >> $GITHUB_OUTPUT
+          fi
+      - name: 'Commit and Push Changes'
+        if: env.merged != 'true' && steps.apply_patch.outputs.applied == 'true'
+        run: |
+          git add .
+          git commit -m "feat: Apply Gemini's automated code improvements"
+          git push origin ${{ github.head_ref }}
+          echo "Committed and pushed Gemini's changes to the PR."
+      - name: 'Comment on PR'
+        if: env.merged != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `${{ steps.gemini_analysis.outputs.summary }}`;
+            const changes_applied = `${{ steps.apply_patch.outputs.applied }}` === 'true';
+            let body;
+            if (changes_applied) {
+              body = "🤖 **Gemini Auto-Review & Implement**\n\nI have analyzed the pull request and implemented the following improvements directly:\n\n" + summary;
+            } else if (summary && summary.trim() !== "" && summary.trim() !== 'null') {
+              body = "🤖 **Gemini Auto-Review**\n\nI have analyzed the pull request and have the following suggestions. I was unable to apply them automatically:\n\n" + summary;
+            } else {
+              body = "🤖 **Gemini Auto-Review**\n\nI have analyzed the pull request and found no necessary changes. Looks good to me!";
+            }
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
