@@ -2,7 +2,7 @@ name: 'Gemini Auto-Review & Implement'
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
 
 # Grant permissions for the workflow to read content, write to PRs and commit code.
 permissions:
