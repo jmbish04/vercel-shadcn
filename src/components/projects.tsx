@@ -1,12 +1,38 @@
 import { useEffect, useState } from "react";
 
+<<<<<<< codex/refactor-for-robustness-and-api-compliance
+export interface Project {
+  scriptId: string;
+  title: string;
+=======
 interface Project {
   id: string;
   title?: string;
+>>>>>>> main
 }
 
 export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
+<<<<<<< codex/refactor-for-robustness-and-api-compliance
+
+  useEffect(() => {
+    fetch('/api/projects')
+      .then((res) => res.json())
+      .then((data) => {
+        setProjects(Array.isArray(data.projects) ? data.projects : []);
+      })
+      .catch((err) => {
+        console.error(err);
+        setProjects([]);
+      });
+  }, []);
+
+  return (
+    <div className="space-y-2">
+      {projects.map((p) => (
+        <div key={p.scriptId}>{p.title}</div>
+      ))}
+=======
   const [files, setFiles] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -50,6 +76,7 @@ export default function Projects() {
           </ul>
         </div>
       )}
+>>>>>>> main
     </div>
   );
 }

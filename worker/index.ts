@@ -1,6 +1,11 @@
 import type { Message } from 'ai';
 import { google } from '@ai-sdk/google';
 import { openai } from '@ai-sdk/openai';
+
+
+import { cloudflare } from '@ai-sdk/cloudflare';
+
+
 import { streamText } from 'ai';
 import { createWorkerAIClient } from 'workers-ai-provider';
 import { Assistants } from '@ai-sdk/assistants';
@@ -26,6 +31,7 @@ async function getWorkerAIModels(env: Env) {
   return client.getModels();
 }
 
+
 interface Env {
   GOOGLE_GENERATIVE_AI_API_KEY: string;
   GOOGLE_APPS_SCRIPT_API_KEY: string;
@@ -47,6 +53,7 @@ export default {
     const url = new URL(request.url);
 
     switch (url.pathname) {
+
       case "/api/chat": {
         const { provider, model, messages } = await request.json<JsonBody>();
         switch (provider) {
@@ -251,6 +258,36 @@ export default {
           );
         }
       }
+
+      return new Response(JSON.stringify({ models }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    case "/api/projects": {
+      if (!env.GOOGLE_API_TOKEN)
+        return new Response('Google API token is not configured', { status: 500 });
+      const res = await fetch('https://script.googleapis.com/v1/projects', {
+        headers: { Authorization: `Bearer ${env.GOOGLE_API_TOKEN}` }
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        return new Response(body, { status: res.status, headers: { 'Content-Type': 'application/json' } });
+      }
+      const data = await res.json<any>();
+      return new Response(JSON.stringify({ projects: data.projects || [] }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    case "/api/project/files": {
+      if (!env.GOOGLE_API_TOKEN)
+        return new Response('Google API token is not configured', { status: 500 });
+      const scriptId = url.searchParams.get('scriptId');
+      if (!scriptId) {
+        return new Response(JSON.stringify({ error: 'Missing scriptId' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      const res = await fetch(`https://script.googleapis.com/v1/projects/${scriptId}/content`, {
+        headers: { Authorization: `Bearer ${env.GOOGLE_API_TOKEN}` }
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        return new Response(body, { status: res.status, headers: { 'Content-Type': 'application/json' } });
+
       case "/api/models": {
         const provider = url.searchParams.get('provider');
         switch (provider) {
@@ -310,7 +347,22 @@ export default {
       default: {
         return new Response(null, { status: 404 });
       }
+      const data = await res.json<any>();
+      return new Response(JSON.stringify({ files: data.files || [] }), { headers: { 'Content-Type': 'application/json' } });
     }
+    case "/api/vectorize": {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } });
+    }
+    default: {
+      return new Response(null, { status: 404 });
+    }
+  }
   },
 } satisfies ExportedHandler<Env>;
 

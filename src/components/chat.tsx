@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import WeatherCard from "@/components/weather-card";
 import { cn } from "@/lib/utils";
+import { fetchSession, fetchModels } from "@/lib/api";
 import { useChat, type Message } from "@ai-sdk/react";
 import { useEffect, useState } from "react";
 
@@ -46,6 +47,37 @@ export default function Chat() {
     body: { provider, model },
   });
   const hasMessages = messages.length > 0;
+  const [sessionError, setSessionError] = useState(false);
+  const [modelError, setModelError] = useState(false);
+  const [models, setModels] = useState<string[]>([]);
+  const [model, setModel] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      const data = await fetchSession();
+      if (!data) setSessionError(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await fetchModels();
+        if (!data || !Array.isArray(data.models) || data.models.length === 0) {
+          setModels([]);
+          setModel('');
+        } else {
+          setModels(data.models);
+          setModel(data.models[0] || '');
+        }
+      } catch (err) {
+        console.error(err);
+        setModels([]);
+        setModel('');
+        setModelError(true);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     fetch(`/api/models?provider=${provider}`)
@@ -69,6 +101,12 @@ export default function Chat() {
   return (
     <>
       <CardContent className="h-[400px] space-y-4">
+        {sessionError && (
+          <div className="text-red-500">Failed to load session</div>
+        )}
+        {modelError && (
+          <div className="text-red-500">Failed to load models</div>
+        )}
         <ScrollArea className="h-full w-full">
           <div className="flex flex-col space-y-4">
             {hasMessages ? (
@@ -97,8 +135,12 @@ export default function Chat() {
                       {message.role === "user" ? "You" : provider.toUpperCase()}
                     </p>
                     <div className="space-y-2">
+
+
+
                       {message.content.startsWith('WEATHER:') ? (
                         <WeatherCard {...JSON.parse(message.content.replace('WEATHER:', ''))} />
+
                       ) : (
                         <Markdown components={MarkdownComponents}>
                           {message.content}
