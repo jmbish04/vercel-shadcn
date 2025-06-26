@@ -14,6 +14,10 @@ async function getOpenAIModels(apiKey: string) {
   const res = await fetch('https://api.openai.com/v1/models', {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(`Failed to fetch OpenAI models: ${res.status} ${errorBody}`);
+  }
   return res.json();
 }
 
