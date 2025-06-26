@@ -1,0 +1,146 @@
+name: 'Gemini Auto-Review & Implement'
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+# Grant permissions for the workflow to read content, write to PRs and commit code.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  gemini_review_and_implement:
+    name: 'Gemini Review & Implement'
+    runs-on: ubuntu-latest
+    # Prevent the action from running on commits made by itself to avoid loops.
+    if: github.actor != 'github-actions[bot]'
+
+    steps:
+      - name: 'Checkout PR Branch'
+        uses: actions/checkout@v4
+        with:
+          # Checkout the actual PR branch, not a detached HEAD.
+          ref: ${{ github.head_ref }}
+          # Fetch depth 0 to get all history for a proper diff.
+          fetch-depth: 0
+
+      - name: 'Set up Git'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: 'Get PR Diff'
+        id: get_diff
+        run: |
+          # Diff against the base branch of the PR.
+          git fetch origin ${{ github.base_ref }}
+          PR_DIFF=$(git diff "origin/${{ github.base_ref }}" "HEAD")
+          # Store the diff in a step output.
+          echo "diff_content<<EOF" >> $GITHUB_OUTPUT
+          echo "$PR_DIFF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: 'Analyze Diff with Gemini and Get Patch'
+        id: gemini_analysis
+        run: |
+          # The core prompt engineering happens here.
+          # We instruct Gemini to act as a senior engineer, review the diff,
+          # and provide its changes in the universal .patch format.
+          # It must also provide a summary for the PR comment.
+          PROMPT='''
+          You are an expert software engineer acting as an automated code reviewer and implementer.
+          Your task is to analyze the following code changes provided in a .diff format.
+          1.  Review the code for bugs, style inconsistencies, and potential improvements.
+          2.  Generate a code patch in the universal diff format (`.patch`) that implements your suggested improvements directly. The patch should be applicable to the original code.
+          3.  Provide a concise, bulleted summary of the changes you are making and the reasoning behind them. This summary will be posted as a comment on the pull request.
+          
+          Respond with a single JSON object containing two keys: "patch" and "summary".
+          - The "patch" key must contain a string of the code changes in the `.patch` format. If no changes are needed, return an empty string.
+          - The "summary" key must contain a markdown string for the pull request comment.
+          
+          Here is the diff:
+          ```diff
+          ${{ steps.get_diff.outputs.diff_content }}
+          ```
+          '''
+
+          # Call the Gemini API
+          # Make sure to handle potential newlines and special characters in the prompt.
+          JSON_PAYLOAD=$(jq -n --arg prompt "$PROMPT" '{
+            "contents": [{
+              "parts": [{
+                "text": $prompt
+              }]
+            }],
+            "generationConfig": {
+              "response_mime_type": "application/json",
+              "temperature": 0.3
+            }
+          }')
+
+          GEMINI_RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "$JSON_PAYLOAD")
+
+          # Extract the JSON content part, which is sometimes nested.
+          CLEAN_JSON=$(echo "$GEMINI_RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+
+          # Output the patch and summary for subsequent steps
+          echo "patch<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLEAN_JSON" | jq -r .patch >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          echo "$CLEAN_JSON" | jq -r .summary >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 'Apply Patch'
+        id: apply_patch
+        if: steps.gemini_analysis.outputs.patch != '' && steps.gemini_analysis.outputs.patch != 'null'
+        run: |
+          echo "Gemini has suggested changes. Applying patch..."
+          echo "${{ steps.gemini_analysis.outputs.patch }}" > gemini.patch
+          
+          # Use 'git apply' to apply the changes. 
+          # The --reject and --whitespace=fix flags make it more robust.
+          if git apply --reject --whitespace=fix gemini.patch; then
+            echo "Patch applied successfully."
+            echo "applied=true" >> $GITHUB_OUTPUT
+          else
+            echo "Failed to apply patch. There might be conflicts."
+            echo "applied=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 'Commit and Push Changes'
+        if: steps.apply_patch.outputs.applied == 'true'
+        run: |
+          # Add all changed files, commit them, and push to the PR branch.
+          git add .
+          git commit -m "style: Apply Gemini's automated code improvements"
+          git push origin ${{ github.head_ref }}
+          echo "Committed and pushed Gemini's changes to the PR."
+
+      - name: 'Comment on PR'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `${{ steps.gemini_analysis.outputs.summary }}`;
+            const changes_applied = `${{ steps.apply_patch.outputs.applied }}` === 'true';
+
+            let body;
+
+            if (changes_applied) {
+              body = "🤖 **Gemini Auto-Review & Implement**\n\nI have analyzed the pull request and implemented the following improvements directly:\n\n" + summary;
+            } else if (summary && summary.trim() !== "" && summary.trim() !== 'null') {
+              body = "🤖 **Gemini Auto-Review**\n\nI have analyzed the pull request and have the following suggestions. I was unable to apply them automatically:\n\n" + summary;
+            } else {
+              body = "🤖 **Gemini Auto-Review**\n\nI have analyzed the pull request and found no necessary changes. Looks good to me!";
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
