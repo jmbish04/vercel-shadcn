@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { useChat, type Message } from "@ai-sdk/react";
 
 const EMPTY_STATE_MESSAGE = `
-# Welcome!
+# Welcome, slut!
 
 This is a chat application powered by:
 
