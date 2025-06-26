@@ -74,8 +74,8 @@ export default {
         if (!res.ok) {
           return new Response(JSON.stringify({ message: 'Failed to fetch models from OpenAI' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
         }
-        const data = await res.json<any>();
-        models = (data.data || []).map((m: any) => m.id);
+        const data = await res.json<{ data?: { id: string }[] }>();
+        models = (data.data ?? []).map((m) => m.id);
       } else if (provider === 'cloudflare') {
         if (!env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID)
           return new Response('Cloudflare credentials are not configured', { status: 500 });
