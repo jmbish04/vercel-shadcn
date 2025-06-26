@@ -49,13 +49,19 @@ export default function Chat() {
     fetch(`/api/models?provider=${provider}`)
       .then((r) => r.json())
       .then((data) => {
-        const items = (data.models || data.data || []).map((m: any) => m.id || m.name || m);
-        setModels(items);
-        if (items.length > 0) {
-          setModel(items[0]);
+        const models = data.models || [];
+        setModels(models);
+        if (models.length > 0) {
+          setModel(models[0]);
+        } else {
+          setModel('');
         }
       })
-      .catch(() => setModels([]));
+      .catch((error) => {
+        console.error(`Failed to fetch models for ${provider}:`, error);
+        setModels([]);
+        setModel('');
+      });
   }, [provider]);
 
   return (

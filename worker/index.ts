@@ -72,23 +72,56 @@ export default {
         const provider = url.searchParams.get("provider");
         switch (provider) {
           case "gemini": {
+            if (!env.GOOGLE_GENERATIVE_AI_API_KEY) {
+              return new Response(JSON.stringify({ error: "Gemini API key not configured" }), { status: 500, headers: { "Content-Type": "application/json" } });
+            }
             const res = await fetch(
               `https://generativelanguage.googleapis.com/v1/models?key=${env.GOOGLE_GENERATIVE_AI_API_KEY}`
             );
-            return new Response(await res.text(), { headers: { "Content-Type": "application/json" } });
+            if (!res.ok) {
+              return new Response(JSON.stringify({ models: [] }), { headers: { "Content-Type": "application/json" } });
+            }
+            const data = await res.json() as { models?: { name: string }[] };
+            const models = (data.models || [])
+              .map(m => m.name)
+              .filter(name => name.includes('generateContent'))  // Only models that support chat
+              .sort();
+            return new Response(JSON.stringify({ models }), { headers: { "Content-Type": "application/json" } });
           }
           case "openai": {
+            if (!env.OPENAI_API_KEY) {
+              return new Response(JSON.stringify({ error: "OpenAI API key not configured" }), { status: 500, headers: { "Content-Type": "application/json" } });
+            }
             const res = await fetch("https://api.openai.com/v1/models", {
               headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
             });
-            return new Response(await res.text(), { headers: { "Content-Type": "application/json" } });
+            if (!res.ok) {
+              return new Response(JSON.stringify({ models: [] }), { headers: { "Content-Type": "application/json" } });
+            }
+            const data = await res.json() as { data?: { id: string }[] };
+            const models = (data.data || [])
+              .map(m => m.id)
+              .filter(id => id.startsWith('gpt-'))  // Only GPT models
+              .sort();
+            return new Response(JSON.stringify({ models }), { headers: { "Content-Type": "application/json" } });
           }
           case "cloudflare": {
+            if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) {
+              return new Response(JSON.stringify({ error: "Cloudflare AI credentials not configured" }), { status: 500, headers: { "Content-Type": "application/json" } });
+            }
             const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/models`;
             const res = await fetch(cfUrl, {
               headers: { Authorization: `Bearer ${env.CLOUDFLARE_AI_TOKEN}` },
             });
-            return new Response(await res.text(), { headers: { "Content-Type": "application/json" } });
+            if (!res.ok) {
+              return new Response(JSON.stringify({ models: [] }), { headers: { "Content-Type": "application/json" } });
+            }
+            const data = await res.json() as { result?: { name: string }[] };
+            const models = (data.result || [])
+              .map(m => m.name)
+              .filter(name => name.includes('llama') || name.includes('mistral'))  // Common chat models
+              .sort();
+            return new Response(JSON.stringify({ models }), { headers: { "Content-Type": "application/json" } });
           }
           default:
             return new Response(JSON.stringify({ models: [] }), { headers: { "Content-Type": "application/json" } });
