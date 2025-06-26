@@ -49,7 +49,7 @@ export default {
           case 'assistant': {
             const query = messages[messages.length - 1]?.content || '';
             const search = await env.VECTORIZE.search(query);
-            const context = search.matches?.map((m: any) => m.metadata.text).join('\n') || '';
+            const context = search.matches?.map((m: { metadata: { text: string } }) => m.metadata.text).join('\n') || '';
             chatModel = openai(model, { apiKey: env.OPENAI_API_KEY });
             chatMessages = [{ role: 'system', content: context }, ...messages];
             break;
