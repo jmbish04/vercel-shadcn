@@ -11,9 +11,39 @@
 	"assets": {
 		"not_found_handling": "single-page-application"
 	},
-	"observability": {
-		"enabled": true
-	}
+        "observability": {
+                "enabled": true
+        },
+        "d1_databases": [{
+                "binding": "DB",
+                "database_name": "chatbot-db",
+                "database_id": "",
+                "preview_database_id": ""
+        }],
+        "kv_namespaces": [{
+                "binding": "CACHE",
+                "id": "",
+                "preview_id": ""
+        }],
+        "r2_buckets": [{
+                "binding": "BUCKET",
+                "bucket_name": "chatbot-bucket"
+        }],
+        "vectorize": [{
+                "binding": "VECTORIZE",
+                "index_name": "chatbot-index"
+        }],
+        "durable_objects": {
+                "bindings": [{
+                        "name": "SESSION_DO",
+                        "class_name": "SessionDO"
+                }]
+        },
+        "vars": {
+                "OPENAI_API_KEY": "",
+                "GEMINI_API_KEY": "",
+                "GITHUB_TOKEN": ""
+        },
 	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

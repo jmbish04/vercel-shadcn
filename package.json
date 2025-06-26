@@ -14,7 +14,9 @@
 	"dependencies": {
                 "@ai-sdk/google": "^1.2.14",
                 "@ai-sdk/openai": "^1.2.14",
-                "@ai-sdk/cloudflare": "^1.2.14",
+                "@ai-sdk/assistants": "^1.2.14",
+                "workers-ai-provider": "^0.5.5",
+
                 "@ai-sdk/react": "^1.2.9",
 		"@radix-ui/react-avatar": "^1.1.7",
 		"@radix-ui/react-scroll-area": "^1.2.6",
