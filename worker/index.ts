@@ -28,18 +28,18 @@ export default {
         switch (provider) {
           case "gemini": {
             if (!env.GOOGLE_GENERATIVE_AI_API_KEY) {
-              return new Response("Gemini API key is not configured.", { status: 500 });
+              return new Response("Gemini API key not configured", { status: 500 });
             }
-            const gemini = google(model || 'gemini-1.5-pro-latest', {
+            const geminiModel = google(model || 'gemini-1.5-pro-latest', {
               apiKey: env.GOOGLE_GENERATIVE_AI_API_KEY,
               useSearchGrounding: true,
             });
-            const result = streamText({ model: gemini, messages });
+            const result = streamText({ model: geminiModel, messages });
             return result.toDataStreamResponse();
           }
           case "openai": {
             if (!env.OPENAI_API_KEY) {
-              return new Response("OpenAI API key is not configured.", { status: 500 });
+              return new Response("OpenAI API key not configured", { status: 500 });
             }
             const openaiModel = openai(model, { apiKey: env.OPENAI_API_KEY });
             const result = streamText({ model: openaiModel, messages });
@@ -47,10 +47,10 @@ export default {
           }
           case "cloudflare": {
             if (!env.CLOUDFLARE_AI_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) {
-              return new Response("Cloudflare AI credentials are not configured.", { status: 500 });
+              return new Response("Cloudflare AI credentials not configured", { status: 500 });
             }
             const cloudflareModel = cloudflare(model, {
-              apiToken: env.CLOUDFLARE_AI_TOKEN,
+              apiKey: env.CLOUDFLARE_AI_TOKEN,
               accountId: env.CLOUDFLARE_ACCOUNT_ID,
             });
             const result = streamText({ model: cloudflareModel, messages });
@@ -120,19 +120,17 @@ export default {
         }
       }
       case "/api/projects": {
-        // REMOVED: Apps Script integration using exec is a security vulnerability
-        // and incompatible with Cloudflare Workers runtime.
-        // TODO: Implement using Google Apps Script API directly
-        return new Response(JSON.stringify({ error: "Apps Script integration temporarily disabled for security" }), {
+        // Apps Script integration removed due to security and runtime incompatibility issues
+        // This feature would require using the Google Apps Script API instead of clasp CLI
+        return new Response(JSON.stringify({ error: "Apps Script integration temporarily disabled" }), {
           status: 501,
           headers: { "Content-Type": "application/json" }
         });
       }
       case "/api/project/files": {
-        // REMOVED: Apps Script integration using exec is a security vulnerability
-        // and incompatible with Cloudflare Workers runtime. 
-        // TODO: Implement using Google Apps Script API directly
-        return new Response(JSON.stringify({ error: "Apps Script integration temporarily disabled for security" }), {
+        // Apps Script integration removed due to security and runtime incompatibility issues
+        // This feature would require using the Google Apps Script API instead of clasp CLI
+        return new Response(JSON.stringify({ error: "Apps Script integration temporarily disabled" }), {
           status: 501,
           headers: { "Content-Type": "application/json" }
         });
