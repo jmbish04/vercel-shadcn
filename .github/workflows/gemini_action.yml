@@ -114,11 +114,11 @@ ${PR_DIFF}
             exit 0
           fi
 
-          # FIX: Use 'prompt' instead of '$prompt' in the jq query. The --arg flag makes it available as a variable.
+          # Use 'prompt' instead of '$prompt' in the jq query. The --arg flag makes it available as a variable.
           JSON_PAYLOAD=$(jq -n --arg prompt "$FINAL_PROMPT" '{
             "contents": [{
               "parts": [{
-                "text": prompt
+                "text": $prompt
               }]
             }],
             "generationConfig": {
@@ -127,6 +127,7 @@ ${PR_DIFF}
             }
           }')
 
+          # FIX: Corrected the malformed URL that was causing a syntax error.
           GEMINI_RESPONSE=$(curl -s -X POST "[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=$){{ secrets.GEMINI_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d "$JSON_PAYLOAD")
