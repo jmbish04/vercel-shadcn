@@ -12,7 +12,9 @@
 		"not_found_handling": "single-page-application"
 	},
         "observability": {
-                "enabled": true
+                "enabled": true,
+                "traces": { "enabled": false },
+                "logs": { "enabled": true, "invocation_logs": false }
         },
         "d1_databases": [{
                 "binding": "DB",
